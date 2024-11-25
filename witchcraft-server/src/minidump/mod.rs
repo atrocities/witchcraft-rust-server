@@ -46,7 +46,7 @@ pub async fn init() -> Result<(), Error> {
     // Ensure that the child's stdin says open until this process exits since that's how it detects the parent exiting.
     mem::forget(child.stdin);
 
-    let client = connect()?;
+    let client = connect().await?;
 
     let guard = CrashHandler::attach(unsafe {
         crash_handler::make_crash_event(move |context| {
@@ -60,9 +60,12 @@ pub async fn init() -> Result<(), Error> {
     Ok(())
 }
 
-pub fn connect() -> Result<minidumper::Client, Error> {
-    for _ in 0..50 {
-        match minidumper::Client::with_name(Path::new(SOCKET_ADDR)) {
+pub async fn connect() -> Result<minidumper::Client, Error> {
+    for _ in 0..200 {
+        match tokio::task::spawn_blocking(|| minidumper::Client::with_name(Path::new(SOCKET_ADDR)))
+            .await
+            .unwrap()
+        {
             Ok(client) => return Ok(client),
             Err(e) => debug!(
                 "error opening minidump client",
@@ -70,7 +73,7 @@ pub fn connect() -> Result<minidumper::Client, Error> {
             ),
         }
 
-        thread::sleep(Duration::from_millis(100));
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
     Err(Error::internal_safe("unable to connect to minidump server"))
