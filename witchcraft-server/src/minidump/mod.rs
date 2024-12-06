@@ -37,16 +37,22 @@ pub async fn init() -> Result<(), Error> {
     fs::create_dir_all(Path::new(SOCKET_ADDR).parent().unwrap()).map_err(Error::internal_safe)?;
 
     let exe = env::current_exe().map_err(Error::internal_safe)?;
-    let child = Command::new(exe)
+    let mut child = Command::new(exe)
         .arg("minidump")
         .stdin(Stdio::piped())
         .spawn()
         .map_err(Error::internal_safe)?;
 
-    // Ensure that the child's stdin says open until this process exits since that's how it detects the parent exiting.
+    let client = connect().await.map_err(|_| match child.try_wait() {
+        Ok(Some(status)) => Error::internal_safe("minidump server prematurely exited")
+            .with_safe_param("status", status.to_string()),
+        Ok(None) => Error::internal_safe("could not connect to running minidump server"),
+        Err(e) => Error::internal_safe(e),
+    })?;
+
     mem::forget(child.stdin);
 
-    let client = connect().await?;
+    // Ensure that the child's stdin says open until this process exits since that's how it detects the parent exiting.
 
     let guard = CrashHandler::attach(unsafe {
         crash_handler::make_crash_event(move |context| {
@@ -61,7 +67,7 @@ pub async fn init() -> Result<(), Error> {
 }
 
 pub async fn connect() -> Result<minidumper::Client, Error> {
-    for _ in 0..200 {
+    for _ in 0..400 {
         match tokio::task::spawn_blocking(|| minidumper::Client::with_name(Path::new(SOCKET_ADDR)))
             .await
             .unwrap()
