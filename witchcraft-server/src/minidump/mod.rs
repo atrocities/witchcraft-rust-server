@@ -50,9 +50,8 @@ pub async fn init() -> Result<(), Error> {
         Err(e) => Error::internal_safe(e),
     })?;
 
-    mem::forget(child.stdin);
-
     // Ensure that the child's stdin says open until this process exits since that's how it detects the parent exiting.
+    mem::forget(child.stdin);
 
     let guard = CrashHandler::attach(unsafe {
         crash_handler::make_crash_event(move |context| {
